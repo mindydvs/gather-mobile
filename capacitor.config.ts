@@ -4,10 +4,6 @@ const config: CapacitorConfig = {
   appId: 'com.gathercal.app',
   appName: 'Gather',
   webDir: 'www',
-  server: {
-    url: 'https://gathercal.com',
-    cleartext: false
-  },
   ios: {
     contentInset: 'automatic',
     preferredContentMode: 'mobile',
@@ -17,12 +13,12 @@ const config: CapacitorConfig = {
     SplashScreen: {
       launchAutoHide: true,
       launchShowDuration: 2000,
-      backgroundColor: '#ffffff',
+      backgroundColor: '#0f0f1a',
       showSpinner: false
     },
     StatusBar: {
-      style: 'DARK',
-      backgroundColor: '#ffffff'
+      style: 'LIGHT',
+      backgroundColor: '#0f0f1a'
     },
     Keyboard: {
       resize: 'body',
