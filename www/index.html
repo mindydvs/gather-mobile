@@ -153,6 +153,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <button class="user-menu-item" onclick="openGroupSettings();closeUserMenu()">Group Settings</button>
     <button class="user-menu-item" onclick="showColorPicker();closeUserMenu()">Change My Color</button>
     <button class="user-menu-item danger" onclick="handleLogout()">Sign Out</button>
+    <button class="user-menu-item danger" onclick="openDeleteAccount();closeUserMenu()">Delete My Account</button>
   </div>
 
   <!-- Group switcher bar -->
@@ -243,6 +244,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="form-actions" style="justify-content:center"><button class="btn-secondary" onclick="closeModal(&#39;deleteGroupModal&#39;)">Keep Group</button><button class="btn-primary" style="background:linear-gradient(135deg,#ef4444,#dc2626)" onclick="confirmDeleteGroup()">Delete Forever</button></div>
 </div></div>
 
+<!-- Delete Account Confirm -->
+<div class="modal-overlay" id="deleteAccountModal" onclick="if(event.target===this)closeModal(&#39;deleteAccountModal&#39;)"><div class="modal" style="text-align:center;padding-bottom:40px"><div class="modal-handle"></div>
+  <div style="font-size:40px;margin:20px 0 10px">⚠️</div>
+  <div class="modal-title" style="margin-bottom:8px">Delete Your Account?</div>
+  <div style="color:var(--text-dim);font-size:14px;margin-bottom:8px">This permanently deletes your Gather account and profile, and removes you from all your groups. Any groups you created will be deleted for everyone in them.</div>
+  <div style="color:#ef4444;font-size:13px;margin-bottom:20px">This cannot be undone.</div>
+  <div class="form-group" style="text-align:left"><label class="form-label">Confirm your password</label><input class="form-input" type="password" id="deleteAccountPass" placeholder="Enter your password"></div>
+  <div id="deleteAccountError" style="color:#ef4444;font-size:13px;margin-bottom:8px;min-height:16px"></div>
+  <div class="form-actions" style="justify-content:center"><button class="btn-secondary" onclick="closeModal(&#39;deleteAccountModal&#39;)">Cancel</button><button class="btn-primary" id="deleteAccountBtn" style="background:linear-gradient(135deg,#ef4444,#dc2626)" onclick="confirmDeleteAccount()">Delete My Account</button></div>
+</div></div>
+
 <!-- Cross-Post to Other Groups -->
 <div class="modal-overlay" id="crossPostModal" onclick="if(event.target===this)closeModal(&#39;crossPostModal&#39;)"><div class="modal"><div class="modal-handle"></div>
   <div class="modal-title">Add to other groups?</div>
@@ -283,6 +295,57 @@ async function handleAuth(type){
   else{const email=document.getElementById('loginEmail').value.trim().toLowerCase(),pass=document.getElementById('loginPass').value;if(!email||!pass){err.textContent='Please enter email and password';return;}try{await auth.signInWithEmailAndPassword(email,pass);}catch(e){err.textContent=authErr(e);}}
 }
 async function handleLogout(){await auth.signOut();closeUserMenu();}
+function openDeleteAccount(){document.getElementById('deleteAccountPass').value='';document.getElementById('deleteAccountError').textContent='';openModal('deleteAccountModal');}
+async function confirmDeleteAccount(){
+  const user=auth.currentUser;
+  const errEl=document.getElementById('deleteAccountError');
+  const btn=document.getElementById('deleteAccountBtn');
+  errEl.textContent='';
+  if(!user){errEl.textContent='You are not signed in.';return;}
+  const pass=document.getElementById('deleteAccountPass').value;
+  if(!pass){errEl.textContent='Please enter your password to confirm.';return;}
+  btn.disabled=true;btn.textContent='Deleting...';
+  try{
+    // Reauthenticate — Firebase requires a recent login before deleting an account
+    const cred=firebase.auth.EmailAuthProvider.credential(user.email,pass);
+    await user.reauthenticateWithCredential(cred);
+    const uid=user.uid;
+    // Remove the user from every group they belong to
+    const groupsSnap=await db.collection('groups').where('memberIds','array-contains',uid).get();
+    for(const gDoc of groupsSnap.docs){
+      const g=gDoc.data();const gRef=gDoc.ref;
+      if(g.ownerId===uid){
+        // Owner: delete the whole group and its sub-data
+        const evSnap=await gRef.collection('events').get();
+        const memSnap=await gRef.collection('members').get();
+        const notSnap=await gRef.collection('notifications').get();
+        const batch=db.batch();
+        evSnap.forEach(d=>batch.delete(d.ref));
+        memSnap.forEach(d=>batch.delete(d.ref));
+        notSnap.forEach(d=>batch.delete(d.ref));
+        batch.delete(gRef);
+        await batch.commit();
+      }else{
+        // Member: remove self from the group
+        await gRef.update({memberIds:firebase.firestore.FieldValue.arrayRemove(uid)});
+        await gRef.collection('members').doc(uid).delete().catch(()=>{});
+      }
+    }
+    // Delete the user's profile document
+    await db.collection('users').doc(uid).delete().catch(()=>{});
+    // Detach live listeners before removing the auth account
+    if(unsE)unsE();if(unsN)unsN();if(unsM)unsM();if(unsG)unsG();
+    // Delete the Firebase Auth account itself
+    await user.delete();
+    closeModal('deleteAccountModal');
+    showToast('Your account has been permanently deleted.');
+  }catch(e){
+    btn.disabled=false;btn.textContent='Delete My Account';
+    if(e.code==='auth/wrong-password'||e.code==='auth/invalid-credential'){errEl.textContent='Incorrect password. Please try again.';}
+    else if(e.code==='auth/too-many-requests'){errEl.textContent='Too many attempts. Please wait a moment and try again.';}
+    else{errEl.textContent='Could not delete account: '+(e.message||'Please try again.');}
+  }
+}
 async function forgotPassword(){
   const email=document.getElementById('loginEmail').value.trim().toLowerCase();
   const err=document.getElementById('authError');
